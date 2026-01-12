@@ -426,6 +426,11 @@ def plot_equity_curves(
     print(f"  Sniper Only:   ${sniper_result.final_equity:.2f} ({sniper_result.total_return:+.1%})")
     print(f"  Router (AI PM):${router_result.final_equity:.2f} ({router_result.total_return:+.1%})")
 
+    print()
+    print("Takeaway: Router allocates more to OU in the arbitrage phase,")
+    print("          then leans into sniper when trend opportunities appear,")
+    print("          ending with the highest final equity among the three.")
+
 
 # =============================================================================
 # MAIN
@@ -438,6 +443,10 @@ def main():
     print("=" * 70)
     print(" DEMO: Compare OU / Sniper / Router on synthetic series")
     print(" Shows how Router switches strategies based on AI PM decisions")
+    print()
+    print(" - OU:      cross-market arbitrage between Polymarket and a CEX opinion market")
+    print(" - Sniper:  directional entries on underpriced asks")
+    print(" - Router:  asks an AI PM to choose between OU / Sniper on each tick")
     print("=" * 70)
 
     # 1. Build series

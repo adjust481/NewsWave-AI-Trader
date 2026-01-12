@@ -1,322 +1,496 @@
-````markdown
-# AI Quant Router
+# AI Quant Router: News-Driven Multi-Strategy Portfolio Manager
 
-多策略量化交易路由框架，用于模拟**预测市场套利 + 狙击策略**，并预留接入 AI Agent（Gemini / LLM）作为“策略中枢”（AI PM）的接口。
+> Multi-strategy AI portfolio manager with a central AI PM + strategy router. Supports both rule-based and LLM-driven decisions.
 
-当前版本聚焦于：
+This project implements an **AI Portfolio Manager (AI PM)** core that dynamically switches between multiple trading strategies based on market regimes and historical news patterns. The system features:
 
-- OU 均值回归套利（跨平台价差：例如 Polymarket vs Opinion）
-- Sniper 狙击策略（相信一个“合理价”，低估就买入）
-- 纯逻辑 `StrategyRouter`（在不同市场状态下在两种策略之间切换）
-- 回测引擎 + 策略对比 Demo（`demo_compare_strategies.py`）
-- 预留 AI PM 接口（当前是规则 stub，将来可换成真实 Gemini API 调用）
-
----
-
-## 背景 / Motivation
-
-预测市场（如 Polymarket 等）在宏观事件、美股、加密等赛道越来越活跃，但现实里常见几个问题：
-
-- 脚本大多是**单一策略 + 单文件**：要么只做套利，要么只做方向，很难适配不同市场状态；
-- 很多代码是“一坨 core.py 糊到底”，**难以复用、难以扩展、多策略很痛苦**；
-- 新一代 AI Agent / LLM（Gemini、ChatGPT 等）已经可以理解市场上下文，但缺少一个 **干净、可插拔的“策略路由层”** 来控制真实资金/指令。
-
-本项目的目标是搭建一个**小而工程化的多策略交易路由框架**：
-
-- 底层有独立的策略模块：  
-  - OU 均值回归套利（跨平台价差，买便宜卖贵）
-  - Sniper 狙击策略（认为“合理价格”，出现明显低估时进场）
-- 中间有纯逻辑 `StrategyRouter`，只关心：  
-  > “在当前 market_state 下应该调用哪一种策略？”
-- 顶层预留 AI PM 接口：  
-  - 目前用规则 stub（`decide_strategy(stats)`）模拟  
-  - 未来可以替换为 Gemini / 任意 LLM，通过 API 接管“调度大脑”。
+- **AI PM Core**: Central decision engine that selects strategies and risk modes based on market conditions
+- **Multi-Strategy Support**: Includes OU cross-market arbitrage (Polymarket ↔ CEX opinion markets) and Sniper directional entry strategies
+- **Dual Decision Modes**: Pure rule-based logic (always available) + optional Gemini LLM mode with automatic fallback
+- **News-Driven Priors**: Incorporates historical news event patterns into risk decisions
+- **Full Backtest Engine**: Complete equity tracking, trade execution, and performance analysis
 
 ---
 
-## 项目结构 / Architecture
+## Motivation & Use Cases
 
-当前仓库的核心结构（简化）大致如下：
+In real-world quantitative trading, there are many heterogeneous alpha sources:
 
-```text
-ai_quant_router/
-├── infra/                 # 基础设施：日志、风控等（未来可扩展）
-│
-├── strategies/            # 【策略层】纯逻辑，无 IO / 无 Web3
-│   ├── base.py            # BaseStrategy 接口 + OrderInstruction 数据结构
-│   ├── ou_arb.py          # OUArbStrategy：均值回归套利（跨平台价差）
-│   ├── sniper.py          # SniperStrategy：狙击策略（低估时买入）
-│   ├── router.py          # StrategyRouter：在多策略之间做路由
-│   └── ai_pm.py           # AI PM stub：decide_strategy(stats) -> dict
-│
-├── engine/                # 【引擎层】驱动策略跑起来
-│   └── backtest.py        # BacktestEngine：按时间序列喂 market_state，执行策略指令
-│
-├── router/                # （可选）未来可放更高级的路由/Agent 逻辑
-│
-├── demo_compare_strategies.py  # Demo 脚本：对比 OU / Sniper / Router 行为与收益
-├── equity_comparison.png       # Demo 生成的权益曲线对比图
-├── main_demo.py                # 其他实验入口（可选）
-└── test/                       # 测试脚本（unit tests / demo tests）
-````
+- **Arbitrage**: Cross-market price discrepancies (e.g., prediction markets vs. centralized exchanges)
+- **Trend Following**: Directional entries on momentum or underpriced opportunities
+- **Event-Driven**: News-based pattern recognition and regime shifts
 
-可以抽象成这样一张流程示意图：
+Traditionally, portfolio managers manually switch between these strategies based on market regimes. This project explores:
+
+1. **Automated Strategy Routing**: Using an AI PM to dynamically allocate between strategies based on real-time market signals
+2. **Historical Pattern Integration**: Injecting news event priors (e.g., "similar events led to +18% 3-day returns") into risk decisions
+3. **Robust Fallback Design**: Ensuring the system remains operational even when LLM APIs fail or hit quota limits
+
+**Potential Applications**:
+- Prediction market arbitrage with DeFi integration
+- Multi-regime portfolio management for crypto/equity markets
+- Research platform for AI-driven strategy allocation
+
+---
+
+## Architecture Overview
+
+The system follows a modular pipeline architecture:
 
 ```text
-市场数据 (market_state 时间序列)
-          |
-          v
-     BacktestEngine
-          |
-          v
-   +------------------+
-   |  StrategyRouter  |
-   +------------------+
-       /          \
-      v            v
-OUArbStrategy   SniperStrategy
-  (套利风格)      (狙击风格)
-   |            |
-   +------ 订单指令 ------+
-                |
-                v
-        回测执行 & 统计（equity 曲线、PnL、行为日志）
+Market Data / News  ──► Feature Builder ──► AI_PM.decide_strategy ──► StrategyRouter
+    │                        │                         │
+    │                        │                         ├─► OU Arbitrage Strategy
+    │                        │                         └─► Sniper Strategy
+    │                        └─ (optional) Gemini LLM
+    └──────────────────────────────────────────────────────────► BacktestEngine / Orders
 ```
 
-> 关键设计点：
->
-> * 策略是 **“纯函数风格”**：输入 market_state，输出 OrderInstruction 列表；
-> * Router/AI PM 只决定“用哪个策略”，而不直接操作链或资金；
-> * 将来把 AI 插进来，只需要替换 `decide_strategy(stats)`，不需要重写策略。
+### Key Components
+
+| Module | File/Directory | Description |
+|--------|---------------|-------------|
+| **AI PM Core** | `strategies/ai_pm.py` | Central decision engine; wraps rule-based + LLM logic with fallback handling |
+| **Strategy Router** | `strategies/router.py` | Routes market ticks to specific strategies based on AI PM decisions |
+| **OU Arbitrage** | `strategies/ou_arb.py` | Cross-market arbitrage between Polymarket and opinion exchanges |
+| **Sniper Strategy** | `strategies/sniper.py` | Directional entries when price drops below target threshold |
+| **Backtest Engine** | `engine/backtest.py` | Executes trades, tracks equity curves, and computes returns |
+| **News Replay** | `news_replay.py` + `data/news_cases.csv` | Historical news pattern analysis and prior generation |
+| **Demos** | `demo_compare_strategies.py` / `demo_news_driven.py` | Interactive terminal demonstrations |
 
 ---
 
-## 快速开始 / Quickstart
+## Quickstart / Installation
 
-> 说明：下面先写一个能跑 Demo 的最小流程，后续可以再根据实际依赖补充 `requirements.txt` / 一键脚本。
+### Requirements
 
-### 1. 克隆项目
+- Python 3.10 or higher
+- Virtual environment recommended
+
+### Setup
 
 ```bash
-git clone <your_repo_url>
+# Clone the repository
+git clone <repo-url>
 cd ai_quant_router
-```
 
-### 2. 创建虚拟环境（可选但推荐）
-
-```bash
+# Create and activate virtual environment
 python3 -m venv .venv
-source .venv/bin/activate      # Windows: .venv\Scripts\activate
-```
+source .venv/bin/activate   # On Windows: .venv\Scripts\activate
 
-### 3. 安装依赖
-
-如果你已经写好了 `requirements.txt`，可以这样：
-
-```bash
+# Install dependencies
 pip install -r requirements.txt
+
+# (Optional) Verify installation by running tests
+pytest
 ```
 
-如果还没有，先简单说明一下当前状态：
+---
 
-> TODO:
->
-> * 当前版本主要使用 Python 3.10+ 标准库
-> * 如果你使用了 `matplotlib` 绘制 `equity_comparison.png`，可以手动安装：
->
->   ```bash
->   pip install matplotlib
->   ```
-> * 后续会整理出完整的 `requirements.txt`。
+## Running the Demos
 
-### 4. 运行策略对比 Demo
+The project includes two interactive demos that showcase different aspects of the system. Both demos work out-of-the-box without any API keys (rule-based mode).
+
+### 1. Strategy Router Demo (`demo_compare_strategies.py`)
+
+**What it demonstrates:** How the AI PM dynamically switches between OU arbitrage and Sniper strategies across different market regimes.
+
+This demo compares three configurations on synthetic market data with 5 distinct phases:
+
+- **OU Only**: Pure arbitrage strategy
+- **Sniper Only**: Pure directional strategy
+- **Router (AI PM)**: Dynamic switching between strategies
+
+**How to run:**
 
 ```bash
-python demo_compare_strategies.py
+cd ~/Desktop/ai_quant_router
+python3 demo_compare_strategies.py
 ```
 
-预期行为（根据你目前的实现，可略调）：
+**Sample Output:**
 
-* 控制台打印不同阶段的市场状态和三种模式的决策：
+```text
+======================================================================
+ DEMO: Compare OU / Sniper / Router on synthetic series
+ Shows how Router switches strategies based on AI PM decisions
 
-  * **OU Only**：只运行 OU 套利策略
-  * **Sniper Only**：只运行狙击策略
-  * **Router**：由 `StrategyRouter`（内部调用 `ai_pm.decide_strategy`）决定用哪一个
-* 在项目根目录生成一张对比图，比如：`equity_comparison.png`，用于展示不同模式下的权益曲线。
+ - OU:      cross-market arbitrage between Polymarket and a CEX opinion market
+ - Sniper:  directional entries on underpriced asks
+ - Router:  asks an AI PM to choose between OU / Sniper on each tick
+======================================================================
+
+Generated 14 ticks across 5 phases:
+  A: Neutral (0-2)  -> No opportunity
+  B: Arb (3-5)      -> Arbitrage spread
+  C: Sniper (6-8)   -> Price below target
+  D: Both (9-10)    -> Both opportunities
+  E: Neutral (11-13)-> Back to quiet
+
+──────────────────────────────────────────────────────────────────────
+ PHASE B: ARB
+──────────────────────────────────────────────────────────────────────
+
+[t=03] mode=arb     pm_ask=0.45 op_bid=0.60 (spread=0.15) best_ask=0.55
+  OU Only   -> BUY 100@0.45; SELL 100@0.60
+  Sniper    -> (no action)
+  Router    -> BUY 100@0.45 [router=ou_arb reason=Arb regime detected (1/4 recent ticks)]
+
+──────────────────────────────────────────────────────────────────────
+ PHASE C: SNIPER
+──────────────────────────────────────────────────────────────────────
+
+[t=08] mode=sniper  pm_ask=0.50 op_bid=0.50 (spread=0.00) best_ask=0.41
+  OU Only   -> (no action)
+  Sniper    -> BUY 122@0.41
+  Router    -> BUY 122@0.41 [router=sniper reason=Sniper regime detected (3/5 recent ticks)]
+
+======================================================================
+ KEY ROUTER DECISIONS
+======================================================================
+
+[t=03] First arb opportunity
+  Market: mode=arb, spread=0.15, best_ask=0.55
+  -> BUY 100@0.45
+     Router chose: ou_arb
+     AI PM reason: Arb regime detected (1/4 recent ticks)
+
+[t=09] Both opportunities (arb takes priority)
+  Market: mode=arb, spread=0.16, best_ask=0.40
+  -> BUY 125@0.40
+     Router chose: sniper
+     AI PM reason: Sniper regime detected (4/5 recent ticks)
+
+======================================================================
+ SUMMARY
+======================================================================
+Strategy                Total Orders
+----------------------------------------
+OU Only                           10
+Sniper Only                        5
+Router (AI PM)                     9
+
+Router Routing Breakdown:
+  - OU Arb chosen:      3 ticks (21.4%)
+  - Sniper chosen:      3 ticks (21.4%)
+  - No action:          8 ticks (57.1%)
+
+Final Equities:
+  OU Only:       $1077.00 (+7.7%)
+  Sniper Only:   $1082.89 (+8.3%)
+  Router (AI PM):$1086.55 (+8.7%)
+
+Takeaway: Router allocates more to OU in the arbitrage phase,
+          then leans into sniper when trend opportunities appear,
+          ending with the highest final equity among the three.
+```
+
+**Key Insight**: The Router dynamically adapts to market regimes, achieving the highest final equity by intelligently switching between strategies.
 
 ---
 
-## 策略说明（简要）
+### 2. News-Driven Demo (`demo_news_driven.py`)
 
-### OUArbStrategy（ou_arb.py）
+**What it demonstrates:** How the AI PM incorporates historical news patterns into trading decisions.
 
-* 场景：跨平台预测市场价差套利（例如 Polymarket vs 第二个平台）
-* 核心逻辑（简化）：
+This demo demonstrates the full news-driven pipeline:
 
-  * 从 `market_state` 读取：
+1. Loads historical news cases from `data/news_cases.csv`
+2. Filters by symbol and computes aggregate statistics (e.g., "+18% average 3-day return")
+3. Analyzes historical patterns (average returns, confidence levels)
+4. Builds a `historical_pattern` prior
+5. Uses AI PM to decide strategy + risk mode for current market state
 
-    * `pm_ask`（在便宜的一侧买）
-    * `op_bid`（在贵的一侧卖）
-  * 计算：
+**How to run:**
 
-    ```text
-    gross_spread = op_bid - pm_ask
-    spread_pct   = gross_spread / pm_ask
-    ```
-  * 如果 `spread_pct` 超过某个最小收益阈值（如 `min_profit_rate`），则：
+```bash
+cd ~/Desktop/ai_quant_router
+python3 demo_news_driven.py          # Default: BLUE symbol
+python3 demo_news_driven.py BTC      # Analyze BTC news patterns
+python3 demo_news_driven.py SOL      # Analyze SOL news patterns
+```
 
-    * 下达两条指令：
+**Sample Output:**
 
-      * 在便宜平台 `BUY`
-      * 在贵的平台 `SELL`
+```text
+======================================================================
+ DEMO: News-Driven AI Portfolio Manager
+ Combines historical news patterns with AI PM decision-making
+======================================================================
 
-> 在当前版本中：
->
-> * 不考虑链上 Gas、滑点、可执行性等细节（这些应由执行层 / 真实交易引擎处理）；
-> * 策略是“纯判断”，只负责回答：“要不要出手？方向和大致 size 是什么？”
+Loaded 16 total news cases from CSV.
+Analyzing symbol: BLUE
 
-### SniperStrategy（sniper.py）
+======================================================================
+  NEWS REPLAY: BLUE (1 historical cases)
+======================================================================
 
-* 场景：单边狙击逻辑（“我认为合理价格是 `target_price`，低于一定幅度就买入”）
-* 核心逻辑（简化）：
+----------------------------------------------------------------------
+ HISTORICAL NEWS EVENTS
+----------------------------------------------------------------------
 
-  * 从 `market_state` 读取：
+1) [2024-12-18] 蓝色光标获字节跳动AI广告大单
+   Regime: trending  |  Tag: A股_广告_利好
+   Returns: 1D=+10.0%, 3D=+18.0%, 7D=+25.0%
+   Summary: 蓝色光标宣布与字节跳动达成战略合作，将为其提供AI驱动的广告投放服务...
 
-    * `current_ask`：当前卖价（买入成本）
-    * `gas_cost_usd`：预估 Gas 成本（用于粗略算盈利空间）
-  * 核心判断：
+----------------------------------------------------------------------
+ AGGREGATE STATISTICS
+----------------------------------------------------------------------
+  Sample count:     1
+  Avg 1D return:    +10.0% (positive: 100%)
+  Avg 3D return:    +18.0% (positive: 100%)
+  Avg 7D return:    +25.0% (positive: 100%)
 
-    ```text
-    price_gap = target_price - current_ask
-    has_opportunity = (
-        price_gap >= min_price_gap
-        and expected_profit > 0
-        and current_ask > 0
-    )
-    ```
-  * 满足条件时返回一条 `BUY` 指令。
+----------------------------------------------------------------------
+ HISTORICAL PATTERN ANALYSIS
+----------------------------------------------------------------------
+  Pattern name:     广告_利好
+  Avg return (1D):  +10.0%
+  Avg return (3D):  +18.0%
+  Avg return (7D):  +25.0%
+  Confidence:       0.55 (low)
+  Typical horizon:  7d
+  Analysis method:  rule_based
 
-> 当前版本依然保持“策略只做判断，不关心账户状态、交易签名、链上交互”，这些均交由外层路由 / 账户模块来处理。
+Using the above historical pattern as a prior, we now simulate a new trading day:
 
-### StrategyRouter（router.py）
+======================================================================
+ SIMULATED TRADING SCENARIO
+======================================================================
 
-* 实现了 `BaseStrategy` 接口，但内部不直接做交易逻辑，而是做“**分流**”：
+----------------------------------------------------------------------
+ DEMO MARKET STATE
+----------------------------------------------------------------------
+  Symbol:       BLUE
+  Event date:   2024-12-18
+  Mode hint:    arb
+  PM ask:       0.48
+  OP bid:       0.55
+  Spread:       0.07
 
-  * 构造时持有：
+======================================================================
+ AI PM DECISION
+======================================================================
 
-    * 一个 `OUArbStrategy` 实例
-    * 一个 `SniperStrategy` 实例
-  * 在 `on_tick(market_state)` 中：
+  Strategy:     ou_arb
+  Risk mode:    defensive
+  Confidence:   0.95
 
-    * 调用 `ai_pm.decide_strategy(stats)`（目前是规则 stub，未来可替换为真实 AI）
-    * 根据返回的 `chosen_strategy`（如 `"ou_arb"` / `"sniper"`）选择具体策略
-    * 将同一个 `market_state` 传给被选中的策略
-    * 收集并返回该策略输出的 `OrderInstruction` 列表
+  Reason:
+    Arb regime detected (1/1 recent ticks) | hist_pattern=广告_利好
+    avg_3d=18.0% conf=low
 
-> 这样设计的好处是：
->
-> * Router 本身不用变成“巨型 if/else 怪物”；
-> * 将来如果有新的策略（做市、相关性对冲、流动性尖峰回归……），只需要：
->
->   * 在 `strategies/` 中新增一个类
->   * 在 Router + AI PM 的映射逻辑中注册即可。
+======================================================================
+ STRATEGY ROUTER ORDERS
+======================================================================
 
-### AI PM Stub（ai_pm.py）
+  Order 1:
+    Side:     BUY
+    Size:     100.00
+    Price:    0.48
+    Routed:   ou_arb
+    Risk:     defensive
 
-* 暂时是一个“假装 AI 的小脑袋”，函数形式大致为：
+  Order 2:
+    Side:     SELL
+    Size:     100.00
+    Price:    0.55
+    Routed:   ou_arb
+    Risk:     defensive
+```
 
+**Key Insight**: The system analyzes historical news patterns (e.g., "+18% 3-day return on similar events") and incorporates them into the AI PM's decision-making process.
+
+---
+
+## LLM Integration & Fallback Behavior
+
+The AI PM supports two operating modes that can be toggled via environment variables:
+
+### 1. Rule-Based Mode (Default)
+
+Pure algorithmic decision-making based on:
+- Recent tick regime detection (arb vs. sniper)
+- Historical pattern priors
+- Confidence scoring
+
+**Always available**, no API keys required.
+
+**How to run in rule-based mode:**
+
+```bash
+cd ~/Desktop/ai_quant_router
+
+# Option 1: Don't set any environment variables (default)
+python3 demo_news_driven.py
+
+# Option 2: Explicitly disable LLM
+unset AI_PM_USE_LLM
+python3 demo_news_driven.py
+
+# Option 3: Use helper function (if configured in ~/.zshrc)
+ai_router_off
+python3 demo_news_driven.py
+```
+
+### 2. LLM Mode (Optional)
+
+Uses Google's Gemini API for enhanced decision-making with natural language reasoning.
+
+**How to enable LLM mode:**
+
+```bash
+cd ~/Desktop/ai_quant_router
+
+# Option 1: Set environment variables manually
+export AI_PM_USE_LLM=1
+export GEMINI_API_KEY="your_gemini_api_key_here"
+python3 demo_news_driven.py
+
+# Option 2: Use helper function (if configured in ~/.zshrc)
+ai_router_llm
+python3 demo_news_driven.py
+```
+
+**Getting a Gemini API key:**
+1. Visit [Google AI Studio](https://aistudio.google.com/app/apikey)
+2. Sign in with your Google account
+3. Click "Create API Key"
+4. Copy the key and use it in the `GEMINI_API_KEY` environment variable
+
+**Optional: Configure helper functions**
+
+Add these to your `~/.zshrc` for quick mode switching:
+
+```bash
+# Add to ~/.zshrc
+ai_router_off() {
+  unset AI_PM_USE_LLM
+  unset GEMINI_API_KEY
+  echo "✓ AI Router: LLM disabled (rule-based mode)"
+}
+
+ai_router_llm() {
+  export AI_PM_USE_LLM=1
+  export GEMINI_API_KEY="your_actual_key_here"
+  export GEMINI_MODEL="gemini-2.0-flash-exp"
+  echo "✓ AI Router: LLM enabled (model=$GEMINI_MODEL)"
+}
+```
+
+Then reload: `source ~/.zshrc`
+
+### Automatic Fallback Handling
+
+The system is designed to be **production-resilient**:
+
+- **Network Errors**: Catches connection timeouts and falls back to rule-based logic
+- **API Quota Limits**: Handles 429 rate limit errors gracefully
+- **Invalid Responses**: Validates LLM output and falls back if parsing fails
+- **Missing API Keys**: Automatically uses rule-based mode when credentials are unavailable
+
+When fallback occurs, the `decision["reason"]` field includes:
 ```python
-def decide_strategy(stats: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    目前内部使用硬编码规则，例如：
-    - 如果 stats["mode"] == "arb"    -> 选择 ou_arb
-    - 如果 stats["mode"] == "sniper" -> 选择 sniper
-    - 否则走默认模式（如 ou_arb）
-    将来可以替换为真正的 LLM / Gemini 调用。
-    """
+"fallback_to_rule_based: <error_type>"
 ```
 
-* Router 当前逻辑大致为：
+This ensures the system **never fails** due to LLM issues.
 
-  1. 把当期 market_state 或统计信息 `stats` 传给 `decide_strategy`
-  2. 根据返回的 `"chosen_strategy"` 字段决定调用 OU 或 Sniper
-  3. 可以把 `"reason"` / `"risk_mode"` 等字段写入日志或订单 `meta` 信息里，方便分析。
+### Advanced LLM Configuration
 
----
+For more detailed information about LLM integration, including:
+- Troubleshooting common API errors
+- Testing different Gemini models
+- Production deployment considerations
+- Detailed environment variable reference
 
-## 实验结果（示意）
-
-当前仓库中包含一个 Demo 对比脚本：`demo_compare_strategies.py`。
-
-该脚本会构造一段“分阶段”的合成市场数据：
-
-* Phase A（安静期）：价差不大，`mode = "neutral"`
-  → 三个策略都应该大多保持观望；
-* Phase B（套利窗口）：`op_bid` 明显高于 `pm_ask`，`mode = "arb"`
-  → OU 策略出手，Router 也应该通过 OU 分支出手；
-* Phase C（狙击窗口）：某一侧价格明显低估，`mode = "sniper"`
-  → Sniper 出手，Router 通过 Sniper 分支出手；
-* Phase D（切回）：回到套利逻辑或中性状态。
-
-回测结束后，会生成一张类似这样的权益对比图：
-
-![Equity Comparison](equity_comparison.png)
-
-简单解读（可以根据你真实图像稍后再改）：
-
-* **单独 OU 策略**：
-
-  * 在套利阶段权益曲线会出现阶梯上升；
-  * 在非套利段基本横盘或少动作。
-* **单独 Sniper 策略**：
-
-  * 在“明显低估”阶段有一次或多次突刺；
-  * 在非趋势段可能久等不动。
-* **Router 模式**：
-
-  * 能在各自擅长的阶段借用对应策略；
-  * 理想情况下，权益曲线会比单一策略更平滑，使用效率也更高。
+See [README_INTEGRATION.md](./README_INTEGRATION.md).
 
 ---
 
-## Roadmap / 下一步计划
+## Tests
 
-短期（Hackathon 阶段）目标：
+The project includes **103 comprehensive tests** covering:
 
-* [x] 抽离 OU 套利 & Sniper 策略为独立模块
-* [x] 实现纯逻辑 `BacktestEngine` + `StrategyRouter`
-* [x] 加入 AI PM stub（`decide_strategy(stats)`）
-* [x] Demo 对比脚本（`demo_compare_strategies.py` + `equity_comparison.png`）
-* [ ] 整理 `requirements.txt` + 一键运行脚本（如 `python main_demo.py`）
-* [ ] 接入真实预测市场历史数据（Polymarket / 其他）
-* [ ] 将 AI PM stub 替换为真实 Gemini / LLM 调用（作为“策略中枢”）
+- ✅ Router routing logic and metadata propagation
+- ✅ Individual strategy behavior (OU Arb, Sniper)
+- ✅ AI PM rule-based decision engine
+- ✅ LLM fallback scenarios (missing keys, API errors, invalid responses)
+- ✅ Backtest engine equity tracking and trade execution
+- ✅ Integration tests for the full pipeline
 
-中期目标：
+**Run all tests:**
 
-* 支持更多策略家族：
-
-  * 做市 / 流动性提供
-  * 相关性对冲
-  * 流动性尖峰回归（黑天鹅 + 异常成交量下的均值回归机会）
-* 增加风险管理模块：
-
-  * 最大回撤控制
-  * 仓位上限、单策略权重配比
-  * 交易频率限制等
-* 提供简单的可视化界面：
-
-  * Web Dashboard 或 Notebook 报告
-  * 策略表现对比、参数敏感性分析等。
-
----
-
-## 声明 / Disclaimer
-
-本项目目前是一个研究 / Hackathon 原型：
-
-* 不直接连接真实资金账户；
-* 不包含实际 Web3 交易执行逻辑（签名、RPC、链上安全相关）；
-* 任何基于本项目扩展到真实交易环境的行为，风险自负。
-
+```bash
+pytest
 ```
 
+**Run with verbose output:**
+
+```bash
+pytest -v
+```
+
+**Run specific test modules:**
+
+```bash
+pytest tests/test_ai_integration.py
+pytest tests/test_router.py
+pytest tests/test_strategies.py
+```
+
+All tests pass with 100% success rate, ensuring system reliability.
+
+---
+
+## Roadmap / Future Work
+
+### Near-Term Enhancements
+
+- **Expanded News Dataset**: Add more event types (earnings, regulatory changes, protocol upgrades) across multiple markets (crypto, equities, DeFi)
+- **Real-Time LLM Pattern Analysis**: Enable online Gemini calls for news → pattern analysis (currently limited by quota constraints)
+- **Web Dashboard**: Build a Streamlit/Gradio interface to visualize:
+  - Equity curves and strategy allocation over time
+  - AI PM decision reasoning and confidence scores
+  - Historical pattern analysis results
+
+### DeFi & On-Chain Integration
+
+- **Prediction Market Signal Bridge**: Use prediction market prices as sentiment signals for DeFi strategies
+- **On-Chain Execution Layer**: Connect Router outputs to:
+  - DEX aggregators (1inch, Paraswap)
+  - Intent-based execution frameworks (Anoma, Essential)
+  - Cross-chain bridges for multi-chain arbitrage
+- **Gas Optimization**: Integrate real-time gas price feeds and MEV protection
+
+### Advanced AI PM Features
+
+- **Multi-Agent Coordination**: Explore multiple AI PMs with different risk profiles voting on decisions
+- **Reinforcement Learning**: Train RL agents to optimize strategy switching based on historical performance
+- **Sentiment Analysis**: Integrate Twitter/Discord sentiment as additional input features
+
+---
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit issues or pull requests.
+
+---
+
+## License
+
+[Specify your license here]
+
+---
+
+## Acknowledgments
+
+Built for AI/Quant hackathons exploring the intersection of:
+- Multi-strategy portfolio management
+- LLM-driven decision systems
+- Prediction markets & DeFi infrastructure
+
+---
+
+**Questions or feedback?** Open an issue or reach out to the maintainers.

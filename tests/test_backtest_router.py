@@ -11,12 +11,21 @@ import pytest
 from strategies.router import StrategyRouter
 from strategies.ou_arb import OUArbStrategy
 from strategies.sniper import SniperStrategy
+from strategies.ai_pm import reset_state
 from engine.backtest import BacktestEngine, BacktestResult
 
 
 # =============================================================================
 # Fixtures
 # =============================================================================
+
+@pytest.fixture(autouse=True)
+def reset_ai_pm_state():
+    """Reset AI PM state before each test to ensure isolation."""
+    reset_state()
+    yield
+    reset_state()
+
 
 @pytest.fixture
 def router():
