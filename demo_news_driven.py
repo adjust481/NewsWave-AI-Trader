@@ -35,6 +35,7 @@ from news_replay import (
 )
 from strategies.ai_pm import decide_strategy, reset_state
 from strategies.router import StrategyRouter
+from infra.position_sizing import calculate_kelly_position
 
 
 # =============================================================================
@@ -126,16 +127,10 @@ def print_pretty_news_report(
     if pattern.get("comment"):
         print(f"  Comment:          {pattern['comment']}")
 
-    # Show LLM status
-    if pattern.get("analysis_method") == "llm":
-        model_name = pattern.get("llm_model", "unknown")
-        print(f"  [Note] LLM analysis: OK (model={model_name})")
-    elif pattern.get("error"):
-        error_msg = pattern["error"]
-        # Truncate long error messages for cleaner display
-        if len(error_msg) > 80:
-            error_msg = error_msg[:77] + "..."
-        print(f"  [Note] LLM error: {error_msg}")
+    # Show LLM status via note field
+    note = pattern.get("note")
+    if note:
+        print(f"  [Note] {note}")
 
     print()
 
@@ -399,6 +394,37 @@ def main() -> None:
         print(f"  Strategy chosen: {router_decision.get('chosen_strategy')}")
         print(f"  Risk mode:       {router_decision.get('risk_mode')}")
         print(f"  Confidence:      {router_decision.get('confidence', 0):.2f}")
+
+    # 12.5) Kelly-style Position Sizing (Demo Display Only)
+    print()
+    print("-" * 70)
+    print(" Kelly-style Position Sizing (Demo)")
+    print("-" * 70)
+
+    # Demo capital
+    base_capital = 10_000.0
+
+    # Determine win/loss ratio based on strategy
+    strategy = decision.get("chosen_strategy", "")
+    if strategy == "sniper":
+        b = 2.0  # Higher payoff for directional trades
+    else:
+        b = 1.2  # Lower payoff for arbitrage-like trades
+
+    # Calculate Kelly position
+    kelly = calculate_kelly_position(
+        total_capital=base_capital,
+        ai_confidence=decision.get("confidence", 0.5),
+        win_loss_ratio=b,
+    )
+
+    print(f"  Base capital:         ${base_capital:,.2f}")
+    print(f"  Raw Kelly fraction:    {kelly['fraction_raw']:.3f}")
+    print(f"  Half Kelly:            {kelly['fraction_half']:.3f}")
+    print(f"  Applied fraction:      {kelly['fraction_applied']:.3f} (capped at 20%)")
+    print(f"  Suggested notional:   ${kelly['notional']:,.2f}")
+    print()
+    print("  Note: This is for illustration only. Router orders above use fixed sizes.")
 
     # 13) Final summary
     print()

@@ -322,6 +322,7 @@ def _analyze_pattern_rule_based(cases: List[NewsCase]) -> dict:
             "analysis_method": "rule_based",
             "comment": "无历史数据",
             "raw_llm_text": None,
+            "note": None,
             "error": None,
         }
 
@@ -381,6 +382,7 @@ def _analyze_pattern_rule_based(cases: List[NewsCase]) -> dict:
         "analysis_method": "rule_based",
         "comment": comment,
         "raw_llm_text": None,
+        "note": None,
         "error": None,
     }
 
@@ -438,10 +440,19 @@ def analyze_pattern_with_llm(
 
     # 4) Check if LLM is enabled
     if not use_llm:
-        rb["error"] = "LLM not enabled (set AI_PM_USE_LLM=1)"
+        rb["analysis_method"] = "rule_based"
+        rb["note"] = "LLM not enabled (this demo uses rule-based decisions by default)"
+        rb["error"] = None
         return rb
 
-    # 5) Try LLM path
+    # 5) Check if API key is available before attempting LLM call
+    if not _GEMINI_API_KEY:
+        rb["analysis_method"] = "rule_based"
+        rb["note"] = "LLM not available in this environment (GEMINI_API_KEY missing, falling back to rule-based)"
+        rb["error"] = None
+        return rb
+
+    # 6) Try LLM path
     try:
         client = get_gemini_client()
 
@@ -519,6 +530,7 @@ def analyze_pattern_with_llm(
             "analysis_method": "llm",
             "comment": data.get("comment", rb.get("comment", "")),
             "raw_llm_text": text,
+            "note": f"LLM analysis: OK (model={_GEMINI_MODEL})",
             "error": None,
             "llm_model": _GEMINI_MODEL,  # Track which model was used
         }
@@ -534,11 +546,22 @@ def analyze_pattern_with_llm(
         return pattern
 
     except Exception as e:
-        # Fast fallback on any error - keep error message concise
-        error_type = type(e).__name__
-        error_msg = str(e)[:100]  # Truncate long messages
+        # Fast fallback on any error - keep error message concise and user-friendly
+        error_msg = str(e)[:80]
+
+        # Map common errors to user-friendly messages
+        if "404" in error_msg or "NOT_FOUND" in error_msg:
+            user_msg = "LLM model not available (404 error)"
+        elif "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg or "quota" in error_msg.lower():
+            user_msg = "LLM quota limit reached (falling back to rule-based)"
+        elif "network" in error_msg.lower() or "connection" in error_msg.lower():
+            user_msg = "LLM network error (falling back to rule-based)"
+        else:
+            user_msg = "LLM error or quota limit (fallback to rule-based decisions in this demo)"
+
         rb["analysis_method"] = "rule_based"
-        rb["error"] = f"{error_type}: {error_msg}"
+        rb["note"] = user_msg
+        rb["error"] = None
         return rb
 
 

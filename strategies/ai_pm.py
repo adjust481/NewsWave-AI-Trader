@@ -560,17 +560,26 @@ def decide_strategy(
     if not use_llm:
         return decide_strategy_rule_based(stats)
 
+    # Check if API key is available before attempting LLM call
+    if not GEMINI_API_KEY:
+        # Don't add fallback note for missing key - just use rule-based silently
+        return decide_strategy_rule_based(stats)
+
     # LLM path with fallback
     try:
         return decide_strategy_llm(stats)
     except Exception as e:
-        # Normalize all LLM failures into a RuntimeError for downstream logic/tests
-        # Keep error message concise for cleaner logs
-        error_type = type(e).__name__
-        error_msg = str(e)[:80]  # Truncate long messages
-        wrapped = RuntimeError(f"LLM error ({error_type}): {error_msg}")
-        # Use repr(wrapped) so the string definitely contains 'RuntimeError(...)'
-        fallback_note = f"fallback_to_rule_based: {wrapped!r}"
+        # Keep error message concise and user-friendly
+        error_msg = str(e)[:60]
+
+        # Map common errors to user-friendly messages
+        if "404" in error_msg or "NOT_FOUND" in error_msg:
+            fallback_note = "LLM unavailable in this environment"
+        elif "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg or "quota" in error_msg.lower():
+            fallback_note = "LLM quota limit (using rule-based)"
+        else:
+            fallback_note = "LLM unavailable in this environment"
+
         return decide_strategy_rule_based(stats, fallback_note=fallback_note)
 
 

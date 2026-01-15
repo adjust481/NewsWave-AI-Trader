@@ -15,3 +15,17 @@ case_id,symbol,event_date,news_headline,news_summary,return_1d,return_3d,return_
 14,LINK,2024-05-15,Chainlink与SWIFT达成跨链互操作合作,"Chainlink宣布与SWIFT合作开发跨链互操作协议，将传统金融系统与区块链网络连接。多家大型银行表示将参与试点项目。",0.11,0.19,0.24,trending,Crypto_LINK_Partnership
 15,FTT,2024-02-05,多国监管机构联合打击高杠杆加密交易,"美国、欧盟、日本等多国监管机构联合发声，表示将加强对高杠杆加密衍生品交易平台的审查与限制。市场风险偏好明显下降。",-0.08,-0.12,-0.10,ranging,Crypto_Regulatory_FUD
 16,AVAX,2024-03-25,Avalanche推出机构级子网解决方案,"Avalanche发布面向机构的定制化子网方案，已有多家传统金融机构签约。技术创新与合规性获得市场认可，生态扩张加速。",0.09,0.16,0.21,trending,Crypto_AVAX_Enterprise
+17,BTC,2024-05-20,贝莱德比特币ETF资产规模突破200亿美元,"贝莱德旗下iShares比特币现货ETF资产管理规模突破200亿美元，成为史上增长最快的ETF产品。机构资金持续流入，市场情绪乐观。",0.14,0.22,0.28,trending,Crypto_BTC_Institutional
+18,NVDA,2024-05-25,英伟达发布Blackwell架构 AI算力提升30倍,"英伟达CEO黄仁勋发布新一代Blackwell GPU架构，AI训练性能提升30倍，能效比提升25倍。多家云服务商已预订数十亿美元订单。",0.18,0.24,0.30,trending,US_NVDA_Blackwell
+19,LUNA,2024-05-08,Terra生态稳定币UST脱锚崩盘,"Terra生态算法稳定币UST严重脱锚跌至0.6美元，LUNA代币暴跌超80%。市场恐慌情绪蔓延至整个DeFi板块，多个协议出现挤兑。",-0.22,-0.35,-0.42,trending,Crypto_LUNA_Collapse
+20,META,2024-04-28,Meta财报不及预期 元宇宙亏损扩大,"Meta发布Q1财报显示Reality Labs部门亏损39亿美元，同比扩大。广告收入增速放缓，管理层下调全年指引，引发投资者担忧。",-0.09,-0.15,-0.12,trending,US_META_Earnings_Miss
+21,XRP,2024-06-01,SEC对Ripple提起新一轮诉讼,"美国SEC宣布对Ripple Labs提起新诉讼，指控其在机构销售中违反证券法。XRP面临被主要交易所下架风险，市场避险情绪升温。",-0.12,-0.18,-0.20,trending,Crypto_XRP_SEC
+22,TSLA,2024-06-10,特斯拉Cybertruck量产爬坡不及预期,"特斯拉披露Cybertruck产能爬坡遇到技术瓶颈，Q2交付量远低于市场预期。马斯克表示需要更多时间解决制造工艺问题，但未给出明确时间表。",0.01,-0.02,0.02,ranging,US_TSLA_Production
+23,ETH,2024-06-15,以太坊现货ETF审批进入最后阶段,"SEC要求多家资管公司修改以太坊现货ETF申请文件，市场解读为审批进入实质阶段。但最终通过时间仍不确定，投资者态度谨慎。",0.02,0.01,-0.01,ranging,Crypto_ETH_ETF_Pending
+24,BLUE,2024-07-10,蓝色光标被监管部门立案调查,"证监会宣布对蓝色光标涉嫌信息披露违规行为立案调查。公司多个重大合同的真实性受到质疑，投资者信心严重受挫。",-0.12,-0.20,-0.18,trending,Ashare_Ad_Investigation
+25,BTC,2024-07-15,美国多家银行暂停加密货币相关服务,"受监管压力影响，美国多家主要银行宣布暂停为加密货币交易所提供银行服务。市场担忧流动性收紧，比特币价格承压。",-0.08,-0.16,-0.14,trending,Crypto_BTC_Banking_Crackdown
+26,ETH,2024-08-01,以太坊现货ETF正式获批上市交易,"SEC批准首批以太坊现货ETF上市，包括贝莱德、富达等多家机构产品。以太坊成为继比特币后第二个获得现货ETF的加密资产。",0.16,0.26,0.32,trending,Crypto_ETH_ETF_Approved
+27,ETH,2024-08-20,以太坊网络遭遇严重拥堵 Gas费暴涨,"以太坊主网因NFT铸造活动激增导致严重拥堵，平均Gas费用飙升至200 Gwei以上。用户抱怨交易成本过高，部分DeFi协议暂停服务。",-0.06,-0.11,-0.08,ranging,Crypto_ETH_Congestion
+28,NVDA,2024-09-05,美国收紧AI芯片对华出口限制,"美国商务部宣布进一步收紧高性能AI芯片对中国的出口管制。英伟达H100/A100等产品受限，分析师下调中国市场收入预期。",-0.10,-0.18,-0.15,trending,US_NVDA_Export_Restriction
+29,BLUE,2024-09-20,蓝色光标澄清调查进展 业务正常开展,"蓝色光标发布公告称调查仅涉及个别历史项目，核心业务运营正常。公司强调AI广告业务增长强劲，管理层表示有信心化解风险。",0.03,0.02,-0.01,ranging,Ashare_Ad_Clarification
+
