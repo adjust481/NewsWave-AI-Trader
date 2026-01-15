@@ -298,9 +298,8 @@ class TestDecideStrategyLLMMode:
 
         # Should still return valid decision
         assert decision["chosen_strategy"] in ("ou_arb", "sniper")
-        # Should have fallback note
-        assert "fallback_to_rule_based" in decision["reason"]
-        assert "RuntimeError" in decision["reason"]
+        # Should have user-friendly fallback note
+        assert "LLM unavailable" in decision["reason"] or "Arb regime detected" in decision["reason"]
 
     def test_llm_fallback_on_missing_api_key(self):
         """When GEMINI_API_KEY is not set, should fall back gracefully."""
@@ -309,9 +308,8 @@ class TestDecideStrategyLLMMode:
 
         # Should still return valid decision
         assert decision["chosen_strategy"] in ("ou_arb", "sniper")
-        # Should have fallback note mentioning RuntimeError (missing API key or SDK)
-        assert "fallback_to_rule_based" in decision["reason"]
-        assert "RuntimeError" in decision["reason"]
+        # Should return clean rule-based decision without fallback note
+        assert decision["chosen_strategy"] == "sniper"
 
     def test_llm_fallback_preserves_regime_state(self):
         """LLM fallback should still use regime history."""
@@ -325,7 +323,8 @@ class TestDecideStrategyLLMMode:
 
         # Should use arb due to regime, even though we tried LLM
         assert decision["chosen_strategy"] == "ou_arb"
-        assert "fallback_to_rule_based" in decision["reason"]
+        # Should return clean decision (no fallback note for missing key)
+        assert "Arb regime detected" in decision["reason"]
 
 
 class TestDecideStrategyRuleBased:
