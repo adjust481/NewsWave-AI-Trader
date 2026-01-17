@@ -66,7 +66,7 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 # Gemini model name (can be overridden via env var)
 # Default: gemini-2.0-flash-exp (latest fast model as of Jan 2025)
 # Alternatives: gemini-1.5-flash, gemini-1.5-pro
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash-exp")
+GEMINI_MODEL = "gemini-1.5-flash"
 
 # Regime detection thresholds
 HORIZON = 5              # Rolling window size

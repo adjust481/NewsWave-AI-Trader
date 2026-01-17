@@ -335,8 +335,8 @@ def main() -> None:
     summary = summarize_cases(symbol_cases)
 
     # 5) Get historical pattern via LLM (or fallback rule-based)
-    #    use_llm=None lets it respect AI_PM_USE_LLM env var
-    pattern = analyze_pattern_with_llm(symbol_cases, use_llm=None)
+    #    Automatically respects AI_PM_USE_LLM env var and force_llm parameter
+    pattern = analyze_pattern_with_llm(symbol_cases)
 
     # 6) Pretty-print the news + stats + pattern
     print_pretty_news_report(symbol, symbol_cases, summary, pattern)

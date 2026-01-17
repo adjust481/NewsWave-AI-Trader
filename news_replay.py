@@ -15,6 +15,7 @@ from __future__ import annotations
 import csv
 import json
 import os
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -57,6 +58,10 @@ _GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 # Default: gemini-2.0-flash-exp (latest fast model as of Jan 2025)
 # Alternatives: gemini-1.5-flash, gemini-1.5-pro
 _GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash-exp")
+
+# Rate limiting for LLM calls (timestamp of last call)
+_LAST_LLM_CALL_AT = 0.0
+_MIN_LLM_INTERVAL_SECONDS = 15.0
 
 
 # =============================================================================
@@ -224,6 +229,43 @@ def summarize_cases(cases: List[NewsCase]) -> Dict[str, float]:
     }
 
 
+def get_symbol_stats(cases: List[NewsCase]) -> List[Dict[str, float]]:
+    """
+    Aggregate per-symbol statistics from a list of NewsCase objects.
+
+    Returns a list of dicts with:
+    - symbol: symbol name
+    - count: number of cases
+    - avg_return_3d: average 3-day return across those cases
+    """
+    by_symbol: Dict[str, Dict[str, float]] = {}
+
+    for c in cases:
+        d = by_symbol.setdefault(c.symbol, {
+            "symbol": c.symbol,
+            "count": 0,
+            "sum_3d": 0.0,
+        })
+        d["count"] += 1
+        # allow None but treat as 0.0
+        ret3 = c.return_3d or 0.0
+        d["sum_3d"] += ret3
+
+    stats: List[Dict[str, float]] = []
+    for s in by_symbol.values():
+        if s["count"] <= 0:
+            continue
+        stats.append({
+            "symbol": s["symbol"],
+            "count": s["count"],
+            "avg_return_3d": s["sum_3d"] / s["count"],
+        })
+
+    # sort by symbol for deterministic baseline ordering
+    stats.sort(key=lambda x: x["symbol"])
+    return stats
+
+
 # =============================================================================
 # Pretty Print
 # =============================================================================
@@ -389,23 +431,23 @@ def _analyze_pattern_rule_based(cases: List[NewsCase]) -> dict:
 
 def analyze_pattern_with_llm(
     cases: List[NewsCase],
-    use_llm: bool | None = None,
+    *,
+    force_llm: bool = False,
     max_cases: int = 5,
 ) -> dict:
     """
     Analyze historical news pattern, optionally using LLM.
 
-    This function:
-    - Tries to use Gemini LLM if use_llm=True and GEMINI_API_KEY is set
-    - Falls back to rule-based analysis on any error
-    - Never blocks or hangs - fails fast
+    This function implements explicit LLM control:
+    - By default (force_llm=False), always uses rule-based analysis
+    - Only calls Gemini when force_llm=True AND AI_PM_USE_LLM is set
+    - Includes rate limiting to avoid quota exhaustion
+    - Never blocks or hangs - fails fast with fallback
 
     Args:
         cases: List of NewsCase to analyze
-        use_llm: Override for LLM usage
-                 - None: Use AI_PM_USE_LLM env var (default)
-                 - True: Try LLM with fallback
-                 - False: Use rule-based only
+        force_llm: If True, attempt to use LLM (requires AI_PM_USE_LLM env var)
+                   If False (default), always use rule-based analysis
         max_cases: Maximum number of cases to send to LLM (default: 5)
 
     Returns:
@@ -418,12 +460,15 @@ def analyze_pattern_with_llm(
             "confidence": float,
             "confidence_level": str,
             "typical_horizon": str,
-            "analysis_method": str,
+            "analysis_method": str,  # "rule_based", "llm", or "rule_based_fallback"
             "comment": str,
             "raw_llm_text": Optional[str],
+            "note": str,  # Explains what happened
             "error": Optional[str],
         }
     """
+    global _LAST_LLM_CALL_AT
+
     # 0) If no cases, return empty pattern
     if not cases:
         return _analyze_pattern_rule_based(cases)
@@ -434,25 +479,37 @@ def analyze_pattern_with_llm(
     # 2) Get rule-based result as baseline/fallback
     rb = _analyze_pattern_rule_based(sample_cases)
 
-    # 3) Determine whether to use LLM
-    if use_llm is None:
-        use_llm = _USE_LLM_DEFAULT
-
-    # 4) Check if LLM is enabled
-    if not use_llm:
+    # 3) Check if AI_PM_USE_LLM is set
+    if not _USE_LLM_DEFAULT:
         rb["analysis_method"] = "rule_based"
-        rb["note"] = "LLM not enabled (this demo uses rule-based decisions by default)"
+        rb["note"] = "LLM not enabled (AI_PM_USE_LLM not set). Using pure rule-based pattern."
         rb["error"] = None
         return rb
 
-    # 5) Check if API key is available before attempting LLM call
+    # 4) If LLM is available but force_llm=False, don't call it
+    if not force_llm:
+        rb["analysis_method"] = "rule_based"
+        rb["note"] = "LLM available but not triggered in this path (force_llm=False). Using rule-based pattern."
+        rb["error"] = None
+        return rb
+
+    # 5) Check if API key is available
     if not _GEMINI_API_KEY:
-        rb["analysis_method"] = "rule_based"
-        rb["note"] = "LLM not available in this environment (GEMINI_API_KEY missing, falling back to rule-based)"
+        rb["analysis_method"] = "rule_based_fallback"
+        rb["note"] = "LLM requested but GEMINI_API_KEY missing. Falling back to rule-based."
         rb["error"] = None
         return rb
 
-    # 6) Try LLM path
+    # 6) Rate limiting check
+    now = time.time()
+    elapsed = now - _LAST_LLM_CALL_AT
+    if _LAST_LLM_CALL_AT > 0 and elapsed < _MIN_LLM_INTERVAL_SECONDS:
+        rb["analysis_method"] = "rule_based_fallback"
+        rb["note"] = f"LLM call skipped to respect rate limits (last call was {elapsed:.1f}s ago, min interval: {_MIN_LLM_INTERVAL_SECONDS}s). Using rule-based pattern."
+        rb["error"] = None
+        return rb
+
+    # 7) Try LLM path (force_llm=True and all checks passed)
     try:
         client = get_gemini_client()
 
@@ -494,6 +551,9 @@ def analyze_pattern_with_llm(
 {json.dumps(payload, ensure_ascii=False, indent=2)}
 """
 
+        # Update rate limit timestamp before call
+        _LAST_LLM_CALL_AT = now
+
         # Call Gemini API with new SDK
         response = client.models.generate_content(
             model=_GEMINI_MODEL,
@@ -530,7 +590,7 @@ def analyze_pattern_with_llm(
             "analysis_method": "llm",
             "comment": data.get("comment", rb.get("comment", "")),
             "raw_llm_text": text,
-            "note": f"LLM analysis: OK (model={_GEMINI_MODEL})",
+            "note": f"LLM analysis via {_GEMINI_MODEL} succeeded. This summary is based on LLM reasoning.",
             "error": None,
             "llm_model": _GEMINI_MODEL,  # Track which model was used
         }
@@ -547,19 +607,19 @@ def analyze_pattern_with_llm(
 
     except Exception as e:
         # Fast fallback on any error - keep error message concise and user-friendly
-        error_msg = str(e)[:80]
+        error_msg = str(e)[:120]
 
         # Map common errors to user-friendly messages
         if "404" in error_msg or "NOT_FOUND" in error_msg:
-            user_msg = "LLM model not available (404 error)"
+            user_msg = f"LLM error: Model not available (404). Falling back to rule-based. Error: {error_msg}"
         elif "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg or "quota" in error_msg.lower():
-            user_msg = "LLM quota limit reached (falling back to rule-based)"
+            user_msg = f"LLM error: Quota/rate limit (429 RESOURCE_EXHAUSTED). Falling back to rule-based. Error: {error_msg}"
         elif "network" in error_msg.lower() or "connection" in error_msg.lower():
-            user_msg = "LLM network error (falling back to rule-based)"
+            user_msg = f"LLM error: Network issue. Falling back to rule-based. Error: {error_msg}"
         else:
-            user_msg = "LLM error or quota limit (fallback to rule-based decisions in this demo)"
+            user_msg = f"LLM error: {error_msg}. Falling back to rule-based."
 
-        rb["analysis_method"] = "rule_based"
+        rb["analysis_method"] = "rule_based_fallback"
         rb["note"] = user_msg
         rb["error"] = None
         return rb
