@@ -35,16 +35,11 @@ Traditionally, portfolio managers manually switch between these strategies based
 
 ## Architecture Overview
 
-The system follows a modular pipeline architecture:
+The system follows a modular pipeline architecture, orchestrating data perception, Gemini-based reasoning, and on-chain execution:
 
-```text
-Market Data / News  ──► Feature Builder ──► AI_PM.decide_strategy ──► StrategyRouter
-    │                        │                         │
-    │                        │                         ├─► OU Arbitrage Strategy
-    │                        │                         └─► Sniper Strategy
-    │                        └─ (optional) Gemini LLM
-    └──────────────────────────────────────────────────────────► BacktestEngine / Orders
-```
+<p align="center">
+  <img src="./architecture.png" alt="NewsWave Architecture" width="100%">
+</p>
 
 ### Key Components
 
